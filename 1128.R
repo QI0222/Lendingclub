@@ -3,7 +3,7 @@
 #Fixed effect related to the loan: loan_amnt, term,installment,purpose
 #Random effect related to the borrower: grade, emp_length, home_ownership, annual_inc, verfication_status, delinq_2yrs,fico_range_low, inq_last_6mths,open_acc,recoveries(binary),application type
 
-pacman::p_load(tidyverse,dplyr,ggplot2,ggthemes,RColorBrewer,rockchalk,car,varhandle,Hmisc,lme4,standardize,glmnet,ggplot2,corrplot,rstanarm)
+pacman::p_load(tidyverse,dplyr,ggplot2,ggthemes,RColorBrewer,rockchalk,car,varhandle,Hmisc,lme4,standardize,glmnet,ggplot2,corrplot,rstanarm,foreign,MASS,Hmisc,reshape2)
 #Data acquisation and cleaning
 lendingdata <- read.csv("lendingclub_12-15.csv",na.strings = "")
 colnames(lendingdata)
@@ -188,3 +188,22 @@ fit7 <- stan_lmer(log(int_rate)~log(loan_amnt)+term+installment+(1+log(loan_amnt
 anova(fit6,fit7)
 
 #Model8: Categorical regression model
+fit8 <- polr(formula=as.factor(int_level)~loan_amnt_level+term+installment,data=subdata,Hess = TRUE)
+summary(fit8)
+ctable <- coef(summary(fit8))
+p <- pnorm(abs(ctable[,"t value"]),lower.tail = FALSE)*2
+ctable <- cbind(ctable,"p value" = p)
+ci <- confint(fit8)
+exp(coef(fit8))
+exp(cbind(OR = coef(fit8),ci))
+#One unit increase in loan_amnt_level, from 2 to 3, the odds of interest rate of "level 1" applying verus "level 2" applying are 0.45 greater.
+#For installment, when the installment amount moves 1 unit, the odds of interest rate level moving from "level 1" to other levels are nearly the same.
+summary(update(fit8,method = "probit",Hess = TRUE),digits = 3)
+summary(update(fit8,method = "logistic",Hess = TRUE),digits = 3)
+summary(update(fit8,method = "cloglog",Hess = TRUE),digits = 3)
+#plot the model
+plot8 <- update(fit8, Hess = TRUE)
+pr <- profile(fit8)
+confint(pr)
+plot(pr)
+pairs(pr)
