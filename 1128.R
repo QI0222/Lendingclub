@@ -17,7 +17,7 @@ class(subdata$verification_status)
 subdata$term <- substr(subdata$term,1,3)
 subdata$int_rate <- substr(subdata$int_rate,2,6)
 subdata$int_rate <- as.numeric(subdata$int_rate)
-subdata$term <- as.numeric(subdata$term)
+#subdata$term <- as.numeric(subdata$term)
 subdata$emp_length <- substr(subdata$emp_length,1,2)
 levels(subdata$verification_status) <- c(0,1,2) #Not verified = 0, source verfied = 1, verified = 2
 subdata[grep(pattern = "<",x = subdata$emp_length),"emp_length"] <- "0"
@@ -188,7 +188,7 @@ fit7 <- stan_lmer(log(int_rate)~log(loan_amnt)+term+installment+(1+log(loan_amnt
 anova(fit6,fit7)
 
 #Model8: Categorical regression model
-fit8 <- polr(formula=as.factor(int_level)~loan_amnt_level+term+installment,data=subdata,Hess = TRUE)
+fit8 <- polr(formula=as.factor(int_level)~loan_amnt_level+as.factor(term)+installment,data=subdata,Hess = TRUE)
 summary(fit8)
 ctable <- coef(summary(fit8))
 p <- pnorm(abs(ctable[,"t value"]),lower.tail = FALSE)*2
