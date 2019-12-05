@@ -135,15 +135,10 @@ crPlots(fit1)
 fit2 <- lm(formula = int_rate~loan_amnt+term+installment+grade+emp_length+home_ownership+annual_inc+verification_status+delinq_2yrs+fico_range_low+open_acc+recoveries,data=subdata)
 summary(fit2)
 plot(fit2)
-fittest <- lm(formula = int_rate~loan_amnt+term+installment+grade+verification_status+delinq_2yrs+recoveries,data=subdata)
-plot(fittest,which = 1)
 #Based on the adjusted R square, the model "fit2" performs better.
 anova(fit1,fit2)
-outliers_fittest <- which(fittest$residuals<=-5)
-fittest$residuals[19820]
-subdata[outliers_fittest,]
-predict(fittest,newdata = subdata[outliers_fittest,])
-str(fittest$residuals)
+
+
 #Correlation map to check if the confounding variables are correlated with the outcome (interst rate).
 cordata <- subdata %>% dplyr::select(4,6,7,9,10,11,13,14,15,16)%>%dplyr::mutate_if(.predicate = is.factor,.funs = as.numeric)
 str(cordata)
@@ -172,6 +167,18 @@ predict(fit3_lasso,type = "coefficients",s=bestlam)
 coef(fit3_lasso)
 #The model indicates that the annual_inc, recoveries, fico_range_low have been shriked to around zero
 #Thus we are left with grade, verification_status and delinq_2yrs to be the selected confounding varibales.
+#confounding variable selection
+
+fittest <- lm(formula = int_rate~loan_amnt+term+installment+grade+verification_status+delinq_2yrs+recoveries,data=subdata)
+plot(fittest,which = 1)
+outliers_fittest <- which(fittest$residuals<=-5)
+subdata[outliers_fittest,]
+str(fittest$residuals)
+predict(fittest,newdata = subdata[outliers_fittest,])
+cor(subdata$int_rate,as.numeric(subdata$grade))
+plot(lm(data = subdata,int_rate~grade),which = 1)
+plot(lm(data = subdata,int_rate~sub_grade),which = 1)
+#switch to mixed effect model
 
 #Model4: multilevel linear regression model with varying intercept
 fit4 <- lmer(log(int_rate)~log(loan_amnt)+term+installment+(1|grade)+(1|verification_status)+(1|delinq_2yrs),data=subdata)
