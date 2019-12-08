@@ -1,0 +1,350 @@
+---
+title: "Report_LendingClub"
+author: "Qi Huang"
+date: "12/7/2019"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+pacman::p_load(tidyverse,dplyr,ggplot2,ggthemes,RColorBrewer,rockchalk,
+               car,varhandle,Hmisc,lme4,standardize,glmnet,ggplot2,corrplot,rstanarm,foreign,MASS,Hmisc,reshape2,caret,bayesplot,loo)
+```
+
+
+Outline
+- Abstract
+This project is about investigating if the interest rate and loan amount have relationship. When the company decides to issue a loan to borrowers, would the larger amount of loan has higher interest rate or not. Data used is the transaction data between 2012 to 2015, from Lending Club.Based on brief findings on EDA, credit rating is another important influencer on interest rate, in other words, borrowers with different credit rating tend to have different interest rate, and borrowers within the group of same credit rating tend to have similar interest rate. Therefore, mixed effect model is applied and selected in this project. The results of the mixed effect model show that loan amount is negatively correlated with interest rate. Another important finding is about transactions that have 6% interest rate. A special group of transactions, with borrowers’ credit rating varies from A to F, has the same 6% interest rate, which is much lower than average. This finding deserves future investigation to avoid default risk.
+
+- Introduction
+Introduction
+Deciding a reasonable interest rate is significant for lending companies. As the major business, personal financing contributes to a large portion of revenues of lending companies, and revenues directly related to interest rates of every transaction. Usually, interest rates depend both on intrinsic features of loans issued and on client’s credit information. For example, long-term loan tends to have higher interest rates compared to short-term loans because of the time risk, and clients who have lower credit scores tend to borrow loans with higher expenses. However, the relationship between loan amount and interest rate is not as clear as other factors. If different loan amount does contribute to different level of interest rates based on this dataset, then loan amount should be incorporated in loan pricing models. 
+
+- Data Description
+```{r}
+#Data acquisation and cleaning
+lendingdata <- read.csv("lendingclub_12-15.csv",na.strings = "")
+#colnames(lendingdata)
+subdata <- lendingdata %>% dplyr::select(1,3,6,7,8,9,10,12,13,14,15,16,26,28,33,46)
+subdata <- subdata%>%tidyr::drop_na()
+#colnames(subdata)
+summary(subdata)
+subdata$term <- substr(subdata$term,1,3)
+subdata$int_rate <- substr(subdata$int_rate,2,6)
+subdata$int_rate <- as.numeric(subdata$int_rate)
+#subdata$term <- as.numeric(subdata$term)
+subdata$emp_length <- substr(subdata$emp_length,1,2)
+levels(subdata$verification_status) <- c(0,1,2) #Not verified = 0, source verfied = 1, verified = 2
+subdata[grep(pattern = "<",x = subdata$emp_length),"emp_length"] <- "0"
+subdata <- subdata %>% mutate(int_level = ifelse(int_rate<=quantile(int_rate,0.25),"1",
+                                          ifelse(int_rate<=quantile(int_rate,0.5),"2",
+                                          ifelse(int_rate<=quantile(int_rate,0.75),"3",
+                                          ifelse(int_rate<=quantile(int_rate,1),"4")))))
+#class(subdata$loan_amnt)
+subdata <- subdata %>% mutate(loan_amnt_level = ifelse(loan_amnt<=quantile(loan_amnt,0.25),"1",
+                                                ifelse(loan_amnt<=quantile(loan_amnt,0.5),"2",
+                                                ifelse(loan_amnt<=quantile(loan_amnt,0.75),"3",
+                                                ifelse(loan_amnt<=quantile(loan_amnt,1),"4")))))
+
+```
+
+Data used in this project is the lending data between 2012 and 2015, from Lending club website.  The original dataset has 150 variables, including both the borrower’s information as well as the transaction information. Each transaction has a unique transaction id that serves as the primary key. There steps are taken when dealing with the data cleaning. First, rather than using all variables in the original dataset, certain variables that are related with the research question are selected to a new dataset. Selected variables are loan amount, term, installment, purpose, grade, subgrade, employment length, home ownership, annual income, verification status, delinquency within last two years, fico range, open account numbers, recoveries and application types. The new dataset has 18 total columns and 42506 transactions in total. Second, N/As are removed in the dataset. The new dataset includes 6 N/A, which accounts for 0.0001% of the whole data population. Therefore, removing those N/A will not strongly influence the pattern of the dataset. Third, the interest rate is a continuous variable that has different values for 42506 transactions, which is not convenient for EDA. Therefore, interest rate is classified to four different levels based on quantile and a new column of interest level is added into the dataset. Same for loan amount. 
+
+- EDA 
+Two general goals are incorporated at the 8 plots in EDA part. First, to visualize if loan amount and interest rate has relationship, which is a brief view of the research question. Second, to visualize if other variables selected have relationship with the interest rate.  
+Plot1: interest rate distribution
+
+```{r}
+#plot1: interest rate distribution
+plot1 <- subdata %>% group_by(int_level) %>% 
+  dplyr::summarize(freq = n()) %>% 
+  ggplot(aes(x=int_level,y=freq,fill=freq))+
+  geom_bar(stat = "identity")+
+  xlab("Interest Rate Level")+
+  ylab("Frequancy")+
+  theme_fivethirtyeight()+
+  theme(legend.position = 'none',axis.text.x = element_text(size = 15))+
+  geom_text(aes(label = freq),vjust = -0.1, size = 4.5)+
+  scale_fill_gradientn(name = '',colors = rev(brewer.pal(10,'Spectral')))+
+  ggtitle("Interest Rate Level")
+print(plot1)
+```
+Plot1 shows the number of people in 4 different interest rate levels.  Based on the plot, the number of people on each level of interest rate is similar. 
+
+Plot2: loan amount distribution
+
+```{r}
+plot2 <- subdata %>% group_by(loan_amnt_level) %>% 
+  dplyr::summarize(freq = n()) %>% 
+  ggplot(aes(x=loan_amnt_level,y=freq,fill=freq))+
+  geom_bar(stat = "identity")+
+  xlab("Loan Amount Level")+
+  ylab("Frequancy")+
+  theme_fivethirtyeight()+
+  theme(legend.position = 'none',axis.text.x = element_text(size = 15))+
+  geom_text(aes(label = freq),vjust = -0.1, size = 4.5)+
+  scale_fill_gradientn(name = '',colors = rev(brewer.pal(10,'Spectral')))+
+  ggtitle("Loan Amount Level")
+print(plot2)
+```
+Plot2 shows the number of people borrowing different amount of loan. Based on the plot, the loan amount that most people borrow is level 3, which is between 9750 to 15000. And least of people borrow loan that is larger than 15000.
+
+Plot3:potential relationship between interest rate and loan amount
+
+```{r}
+plot3.a <- subdata %>% ggplot(aes(x=loan_amnt_level,y=int_rate))+geom_point(size = 0.3)
+plot3.a
+plot3.b <- boxplot(int_rate~loan_amnt_level,data=subdata)
+plot3.b
+```
+Plot3 gives a visualization of potential relationship between different level of loan amount and different level of interest rate. Based on the results, higher level of loan amount, which is the larger loan amount, tends to have higher interest rate. The relationship is clearer with the boxplot, where the mean of interest rate increases with the higher loan amount level.  One finding related with the boxplot is the extremely high interest rate with loan amount level of 1,2,3. Further investigation on those extreme values are implemented.
+
+Plot4: grade distributon
+
+```{r}
+plot4 <- subdata %>% group_by(grade) %>% 
+  dplyr::summarize(freq = n()) %>% 
+  ggplot(aes(x=grade,y=freq,fill=freq))+
+  geom_bar(stat = "identity")+
+  xlab("Grade")+
+  ylab("Frequancy")+
+  theme_fivethirtyeight()+
+  theme(legend.position = 'none',axis.text.x = element_text(size = 15))+
+  geom_text(aes(label = freq),vjust = -0.1, size = 4.5)+
+  scale_fill_gradientn(name = '',colors = rev(brewer.pal(10,'Spectral')))+
+  ggtitle("Grade")
+print(plot4)
+```
+Plot 4 gives a view on the credit rating distribution on the dataset. Based on the plot result, most of borrowers are in graded at A to D, with most borrowers graded at level B and least of borrowers graded at level G. This distribution indicates that the borrowers that have transaction records are in good credit condition, which could potentially result from credit requirements and certification when applying for a loan. 
+
+Plot5: grade related with interest rates
+
+```{r}
+plot5 <- subdata %>% ggplot(aes(x=int_level,fill=grade))+
+  geom_density(alpha = 0.3)+
+  theme(legend.position = "none")+
+  theme_fivethirtyeight()+
+  xlab("Interst rate level")+
+  ggtitle("Interest rate by borrower's Grade")+
+  facet_grid(grade ~., scales = "free")
+plot5
+```
+Plot 5 is the distribution of interest rate grouped by borrower’s grade. Based on the plot result, people with worse credit grading have higher interest rate level. For example, most people with credit rating at A have interest rate at level 1, which is the lowest level of interest rate; while most people with credit rating at F and G have interest rate at level 4, which is the highest level of interest rate.
+
+Plot 6:employment length
+
+```{r}
+plot6 <- subdata %>% group_by(emp_length) %>% 
+  dplyr::summarize(freq = n()) %>% 
+  top_n(50) %>% 
+  ggplot(aes(reorder(emp_length,freq),y=freq,fill = freq))+
+  geom_bar(stat = "identity", position = "dodge")+
+  xlab("emp_length")+
+  ylab("Frequency")+
+  coord_flip()+
+  theme_fivethirtyeight()+
+  theme(legend.position = 'none',axis.text.x = element_text(size = 15))+
+  geom_text(aes(label = freq),vjust = -0.1, size = 4.5)+
+  scale_fill_gradientn(name = '',colors = rev(brewer.pal(10,'Spectral')))+
+  ggtitle("Employment length")
+print(plot6)
+```
+Plot 6 is the distribution of employment length of borrowers. Based on the plot result, most of borrowers have been working for more than 10 years. However, there also comes a large number of borrowers that have no working experience.  This finding might be caused by different reasons of borrowing. For example, people with long employment length might borrow money to purchase real estate, and people with no working experience could be student who are applying for student loan. 
+
+Plot 7: borrowers home ownership type
+
+```{r}
+plot7 <- subdata %>% group_by(home_ownership) %>% 
+  dplyr::summarize(freq = n()) %>% 
+  ggplot(aes(reorder(home_ownership,freq),y = freq, fill = freq))+
+  geom_bar(stat = "identity", position = "dodge")+
+  xlab("home_ownership")+
+  ylab("Frequency")+
+  #scale_color_fivethirtyeight()+
+  theme_fivethirtyeight()+
+  theme(legend.position = 'none',axis.text.x = element_text(size = 15))+
+  geom_text(aes(label = freq),vjust = -0.1, size = 4.5)+
+  scale_fill_gradientn(name = '',colors = rev(brewer.pal(10,'Spectral')))+
+  ggtitle("Home Ownership")
+print(plot7)
+```
+Plot 7 is the distribution of home ownership of borrowers. Home ownership is related with credit risk assessment in the sense of asset-backed loan. Also, the home ownership might indicate the reason for borrowing. Based on the plot result, most of borrowers rent a house or has a mortgage. 
+
+- Model fitting and results
+Model 1: simple linear model without confounding variables (personal information realted with interest rate)
+
+```{r}
+fit1 <- lm(formula = int_rate~loan_amnt+term+installment,data = subdata)
+summary(fit1)
+plot(fit1, which = 1)
+crPlots(fit1)
+```
+The first model (fit1) is trying to assess if the interest rate is strongly related with loan structure under linear regression, including loan amount, term and installment. Based on the model fitting results, loan amount, term and installment are all significantly correlated with interest rates.  For every unit increase of log loan amount, the interest rate will decrease 20%. To check the assumption of the model, residual plots are provided. Component residual plots indicates that the variables of loan amount and installment align with the linear assumption. However, adjusted R square of fit 1 is only 0.25, indicating that the linear model does not capture enough information in the dataset.
+
+Model 2: simple liner model with confounding variables (personal information related with interest rate)
+
+```{r}
+fit2 <- lm(formula = log(int_rate)~log(loan_amnt)+term+log(installment)+grade+emp_length+home_ownership+annual_inc+verification_status+delinq_2yrs+fico_range_low+open_acc+recoveries,data=subdata)
+summary(fit2)
+plot(fit2)
+```
+The second model (fit2) also uses the linear regression but incorporates borrowers’ personal information in confounding variables. Based on the model fitting results, all the variables selected are significantly correlated with interest rate.  For every unit increase of log loan amount, the interest rate will decrease 20%. The R square for fit 2 is 0.92, indicating that this model captures much more information than model 1. Furthermore, the improvement of R square indicates that personal information is important when determining the interest rate. 
+
+ANOVA test
+```{r}
+anova(fit1,fit2)
+```
+An ANOVA test is implemented for comparing fit 1 and fit2, RSS (residual sum of square) decreases from 3309 to 353, indicates that the model with borrowers’ personal information is much better than the first model.
+
+Correlation map to check if the confounding variables are correlated with the outcome (interst rate).
+
+```{r}
+cordata <- subdata %>% dplyr::select(4,6,7,9,10,11,13,14,15,16)%>%dplyr::mutate_if(.predicate = is.factor,.funs = as.numeric)
+str(cordata)
+#cordata <- as.numeric(cordata)
+cormat <- round(cor(cordata),2)
+corplot1 <- corrplot(cormat,type = "upper",order="hclust",tl.cex = 0.5)
+```
+Based on the correlation plot, int_rate and grade, int_rate and fico_range have strong relationship.
+
+Model 3: Lasso regression to choose the confounding varibales
+
+```{r}
+x <- model.matrix(int_rate~.,cordata)
+y <- cordata$int_rate
+train <- sample(1:nrow(x),nrow(x)*.67)
+test <- (-train)
+y.test <- y[test]
+length(y[train])
+length(y.test)
+#find the best lambda from out list via cross-validation
+cv.out=cv.glmnet(x[train,],y[train],alpha=0)
+plot(cv.out,label=TRUE)
+bestlam <- cv.out$lambda.min
+#glmnet()function standardizes the varibales by default
+fit3_lasso <- glmnet(x[train,],y[train],alpha = 1,lambda = 0.008)
+predict(fit3_lasso,type = "coefficients",s=bestlam)
+coef(fit3_lasso)
+
+fittest <- lm(formula = log(int_rate)~log(loan_amnt)+term+log(installment)+grade+verification_status+delinq_2yrs+recoveries,data=subdata)
+summary(fittest)
+plot(fittest,which = 1)
+outliers_fittest <- which(fittest$residuals<=-5)
+subdata[outliers_fittest,]
+cor(subdata$int_rate,as.numeric(subdata$grade))
+plot(lm(data = subdata,int_rate~grade),which = 1)
+```
+The third model is to choose confounding variables by Lasso regression. Based on the model results, variables of annual income, recoveries, fico range have been shrinking to around zero. Thus, confounding variables are now left with grade, verification status and delinquency to be fitted to linear regression model.
+The model named “fittest” is the linear model with variables selected by lasso regression. On the one hand, with R square at 0.91, the linear model still captures most of the information in the dataset. On the other hand, two important findings are shown in the residual plot. First, the residuals are grouped. Second, outliners at the button of the residual plot tends to have some pattern. 
+To investigate more about the outliners, those outliners are filtered. One important finding is that all those outliners have interest rate at 6%, no matter how the other factors are varied. Further concerns about the same 6% are recommended. 
+The grouped pattern of residual is caused by different credit grades, with a strong correlation between grade and interest rate. Thus, the mixed effect model is implemented rather than simple linear regression model.
+
+Model 4:multilevel linear regression model with varying intercept
+```{r}
+fit4 <- lmer(log(int_rate)~log(loan_amnt)+term+installment+(1|grade)+(1|verification_status)+(1|delinq_2yrs),data=subdata)
+summary(fit4)
+```
+
+Model 5: multilevel linear regression model with varying slopes
+
+```{r}
+fit5 <- lmer(log(int_rate)~log(loan_amnt)+term+installment+(1+log(loan_amnt)|grade)+(1+log(loan_amnt)|verification_status)+(1+log(loan_amnt)|delinq_2yrs),data=subdata)
+summary(fit5)
+```
+On model 4, for each increase in the level of grade, the intercept will increase 0.1177, causing 12% increase of interest rate keeping other variables constant. For the fixed effect, each unit increase in the log loan amount corresponds to 3% decrease of the interest rate.
+On model 5, for each increase in the grade level, the intercept will increase 0.003, and the slope of log loan amount will increase 0.00002. For the fixed effect, each unit increase in the log loan amount corresponds to 3% decrease of the interest rate. There is not big difference between adding the random effect to varying slope or not.
+
+Model 6:Beyasian multilevel linear regression model (varying intercept)
+
+#fit6 <- stan_lmer(log(int_rate)~log(loan_amnt)+term+installment+(1|grade)+(1|verification_status)+(1|delinq_2yrs),data=subdata)
+#summary(fit6)
+
+
+Model7: Beyasian multilevel linear regression model (varying intercept and slope)
+
+#fit7 <- stan_lmer(log(int_rate)~log(loan_amnt)+term+installment+(1+log(loan_amnt)|grade)+(1+log(loan_amnt)|verification_status)+(1+log(loan_amnt)|delinq_2yrs),data=subdata)
+#summary(fit7)
+
+
+Model8: Categorical regression model
+```{r}
+fit8 <- polr(formula=as.factor(int_level)~loan_amnt_level+as.factor(term)+installment,data=subdata,Hess = TRUE)
+summary(fit8)
+ctable <- coef(summary(fit8))
+p <- pnorm(abs(ctable[,"t value"]),lower.tail = FALSE)*2
+ctable <- cbind(ctable,"p value" = p)
+ci <- confint(fit8)
+exp(coef(fit8))
+exp(cbind(OR = coef(fit8),ci))
+#One unit increase in loan_amnt_level, from 2 to 3, the odds of interest rate of "level 1" applying verus "level 2" applying are 0.45 greater.
+#For installment, when the installment amount moves 1 unit, the odds of interest rate level moving from "level 1" to other levels are nearly the same.
+summary(update(fit8,method = "probit",Hess = TRUE),digits = 3)
+summary(update(fit8,method = "logistic",Hess = TRUE),digits = 3)
+summary(update(fit8,method = "cloglog",Hess = TRUE),digits = 3)
+#plot the model
+plot8 <- update(fit8, Hess = TRUE)
+pr <- profile(fit8)
+confint(pr)
+plot(pr)
+pairs(pr)
+```
+Model 8 is the categorical regression model to investigate the difference between each level of interest rate. 
+At level 2 loan amount, the odds of interest rate of level 1 compared to level 2 are 0.45 greater.
+At level 3 loan amount, the odds of interest rate of level 1 compared to level 2 are 0.21 greater.
+At level 4 loan amount, the odds of interest rate of level 1 compared to level 2 are 0.08 greater.
+For installment, when the installment amount moves 1 unit, the odds of interest rate level moving from "level 1" to other levels are nearly the same.
+
+- Model validation
+In this project, model validation is implemented on confirming the alignment of assumptions and accuracy of predicted results.
+Model 1 and model 2: qqplots, residual plots and R square.
+
+```{r}
+plot(fit1, which = 1)
+```
+Based on the residual plot, the assumption of normality of residuals is not satisfied. Outliers in the left side is another problem. After investigation the residuals, those outliers are a set of transactions with 6% interest rate. With R square at 0.25, the model is not accurate enough.
+
+```{r}
+plot(fit2)
+```
+For the second model, the assumption of normality of residuals is satisfied with most of data equally distributed within the zero-horizontal line. The assumption of normality of residuals is satisfied with most of dots plotted as a straight line in normal Q-Q plot.
+With R square at 0.92, the model is expected to make good determination.
+
+Model 4 and Model 5: qq plots, residual plots, AIC
+
+```{r}
+qqnorm(resid(fit4))
+qqline(resid(fit4))
+```
+
+```{r}
+qqnorm(resid(fit5))
+qqline(resid(fit5))
+hist(resid(fit5))
+```
+The normal Q-Q plot for model 4 and model 5 indicate that these two models meet the assumption of normality of residuals.
+
+```{r}
+aic4 <- AIC(fit4)
+aic5 <- AIC(fit5)
+aic <- cbind(aic4,aic5)
+aic
+h1 <- hist(subdata$int_rate)
+h2 <- hist(exp(predict(fit4)))
+h3 <- hist(exp(predict(fit5)))
+```
+With lower level of AIC, model 4 tends to perform better than model 5. However, comparing the histogram of predicted value to raw data, the accuracy of the model still needs improvement.
+
+- Summary of key findings
+1.	Credit grades is the most important factor to determine the interest rate.  A certain level of credit grade would have a certain range of interest rate. People with lower credit grading have higher interest rate. 
+2.	Loan amount has negative correlation with interest rate. For every unit increase of log loan amount, the interest rate will decrease 20%.
+3.	There is a group of people, with different credit rating grades, have the same interest rate at 6%, which is relatively low compared to the interest rate for whole population. Even for people with grade F, enjoys the interest rate of 6%. This finding deserves further consideration since it corporates huge default risks. 
+
+- Limitations
+1. The accuracy of all the model is not high enough to make predictions.
+2. Those outliers with 6% interest rate are not removed, which might impact the model validation.
+
+- Future direction
+1. Investigate transactions with 6% interest rater. Due dilligence is suggested to make sure the the interest rate is reasonable and the default risk is not too high. Also, investigate why the interest rate is the same for all those transactions, in a relatively low level.
+2. Determine the interest rate is the pricing stage for lending. How to control the risk afterwards is considered to be the next step.

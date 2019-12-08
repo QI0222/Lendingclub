@@ -3,11 +3,12 @@
 #Fixed effect related to the loan: loan_amnt, term,installment,purpose
 #Random effect related to the borrower: grade, emp_length, home_ownership, annual_inc, verfication_status, delinq_2yrs,fico_range_low, inq_last_6mths,open_acc,recoveries(binary),application type
 
-pacman::p_load(tidyverse,dplyr,ggplot2,ggthemes,RColorBrewer,rockchalk,car,varhandle,Hmisc,lme4,standardize,glmnet,ggplot2,corrplot,rstanarm,foreign,MASS,Hmisc,reshape2)
+pacman::p_load(tidyverse,dplyr,ggplot2,ggthemes,RColorBrewer,rockchalk,
+               car,varhandle,Hmisc,lme4,standardize,glmnet,ggplot2,corrplot,rstanarm,foreign,MASS,Hmisc,reshape2,caret,bayesplot,loo)
 #Data acquisation and cleaning
 lendingdata <- read.csv("lendingclub_12-15.csv",na.strings = "")
 colnames(lendingdata)
-subdata <- lendingdata %>% select(1,3,6,7,8,9,10,12,13,14,15,16,26,28,33,46)
+subdata <- lendingdata %>% dplyr::select(1,3,6,7,8,9,10,12,13,14,15,16,26,28,33,46)
 subdata <- subdata%>%tidyr::drop_na()
 colnames(subdata)
 summary(subdata)
@@ -63,9 +64,9 @@ plot2 <- subdata %>% group_by(loan_amnt_level) %>%
 print(plot2)
 
 #plot3: potential relationship between interest rate and loan amount
-plot3 <- subdata %>% ggplot(aes(x=loan_amnt_level,y=int_rate))+geom_point(size = 0.3)
+plot3.a <- subdata %>% ggplot(aes(x=loan_amnt_level,y=int_rate))+geom_point(size = 0.3)
 plot3
-
+plot3.b <- boxplot(int_rate~loan_amnt_level,data=subdata)
 #plot4: grade distribution
 plot4 <- subdata %>% group_by(grade) %>% 
   dplyr::summarize(freq = n()) %>% 
@@ -122,9 +123,14 @@ plot7 <- subdata %>% group_by(home_ownership) %>%
 print(plot7)
 #Interpretation: Most of the borrowers rent a house or have a house mortgage.
 
-#Modeling
+#MODELING
+#Use training set to do Modeling
+train.control <- trainControl(method = "cv",number = 2)
+model.1 <- train(int_rate~.,data=subdata,method = "lm",trControl = train.control)
+
+
 #Model 1: simple linear model without confounding variables (personal information realted with interest rate)
-fit1 <- lm(formula = int_rate~loan_amnt+term+installment,data = subdata)
+fit1 <- lm(formula = log(int_rate)~log(loan_amnt)+term+installment,data = subdata)
 summary(fit1)
 plot(fit1, which = 1)
 crPlots(fit1)
@@ -132,9 +138,9 @@ crPlots(fit1)
 #confounding variables: grade, emp_length, home_ownership, annual_inc, verfication_status, delinq_2yrs,fico_range_low,open_acc,recoveries(binary),application type
 #Model 2: simple liner model with confounding variables (personal information related with interest rate). Does this model perform better?
 ###weird outliers
-fit2 <- lm(formula = int_rate~loan_amnt+term+installment+grade+emp_length+home_ownership+annual_inc+verification_status+delinq_2yrs+fico_range_low+open_acc+recoveries,data=subdata)
+fit2 <- lm(formula = log(int_rate)~log(loan_amnt)+term+log(installment)+grade+emp_length+home_ownership+annual_inc+verification_status+delinq_2yrs+fico_range_low+open_acc+recoveries,data=subdata)
 summary(fit2)
-plot(fit2)
+plot(fit2,which=1)
 #Based on the adjusted R square, the model "fit2" performs better.
 anova(fit1,fit2)
 
@@ -181,14 +187,25 @@ plot(lm(data = subdata,int_rate~sub_grade),which = 1)
 #switch to mixed effect model
 
 #Model4: multilevel linear regression model with varying intercept
-fit4 <- lmer(log(int_rate)~log(loan_amnt)+term+installment+(1|grade)+(1|verification_status)+(1|delinq_2yrs),data=subdata)
-
+fit4 <- lmer(log(int_rate)~log(loan_amnt)+term+installment+(1|grade)+(1|verification_status)+(1|delinq_2yrs),data=subdata,REML = TRUE)
+summary(fit4)
+plot(fit4)
+qqnorm(resid(fit4))
+qqline(resid(fit4))
+aic(fit4)
+predict(fit4)
+mm_plot <- ggplot(subdata, aes(x = loan_amnt, y = int_rate)) +
+  facet_wrap(~grade)   # a panel for each grade
+  #geom_line(data = cbind(subdata, pred = predict(fit4)), aes(y = pred), size = 1)
+mm_plot
 #Model5: multilevel linear regression model with varying slopes
 fit5 <- lmer(log(int_rate)~log(loan_amnt)+term+installment+(1+log(loan_amnt)|grade)+(1+log(loan_amnt)|verification_status)+(1+log(loan_amnt)|delinq_2yrs),data=subdata)
+summary(fit5)
 anova(fit4,fit5)
-
+#par(mar = rep(2, 4))
+#plot(residuals(fit5))
 #Model6: Beyasian multilevel linear regression model
-fit6 <- stan_lmer(log(int_rate)~log(loan_amnt)+term+installment+(1|grade)+(1|verification_status)+(1|delinq_2yrs),data=subdata)
+fit6 <- stan_lmer(log(int_rate)~log(loan_amnt)+term+installment+(1|grade)+(1|verification_status)+(1|delinq_2yrs),data=subdata,REML = TRUE)
 
 #Model7: Beyasian multilevel linear regression model
 fit7 <- stan_lmer(log(int_rate)~log(loan_amnt)+term+installment+(1+log(loan_amnt)|grade)+(1+log(loan_amnt)|verification_status)+(1+log(loan_amnt)|delinq_2yrs),data=subdata)
@@ -210,7 +227,12 @@ summary(update(fit8,method = "logistic",Hess = TRUE),digits = 3)
 summary(update(fit8,method = "cloglog",Hess = TRUE),digits = 3)
 #plot the model
 plot8 <- update(fit8, Hess = TRUE)
+plot8
 pr <- profile(fit8)
 confint(pr)
 plot(pr)
 pairs(pr)
+
+#Model Validation
+train.control <- trainControl(method = "cv",number = 10)
+model.1 <- train(int_rate~.,data=subdata,method = "lm",trControl = train.control)
